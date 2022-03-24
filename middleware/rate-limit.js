@@ -3,6 +3,11 @@ import statsd from '../lib/statsd.js'
 
 const EXPIRES_IN_AS_SECONDS = 60
 
+const MAX = process.env.RATE_LIMIT_MAX ? parseInt(process.env.RATE_LIMIT_MAX, 10) : 10000
+if (isNaN(MAX)) {
+  throw new Error(`process.env.RATE_LIMIT_MAX (${process.env.RATE_LIMIT_MAX}) not a number`)
+}
+
 export default rateLimit({
   // 1 minute
   windowMs: EXPIRES_IN_AS_SECONDS * 1000,
@@ -13,16 +18,16 @@ export default rateLimit({
   // by the current number of instances.
   // We have see DDoS attempts against prod that hits the `/` endpoint
   // (and not following the redirect to `/en`) at roughly 200k per minute.
-  max: 100,
+  max: MAX,
+
+  // Return rate limit info in the `RateLimit-*` headers
+  standardHeaders: true,
+  // Disable the `X-RateLimit-*` headers
+  legacyHeaders: false,
 
   handler: (request, response, next, options) => {
-    const ip = request.headers['x-forwarded-for'] || request.ip
-    const tags = [`url:${request.url}`, `ip:${ip}`]
-    statsd.increment('rate_limit', 1, tags)
-    // NOTE! At the time of writing, the actual rate limiting is disabled!
-    // At least we can start recording how often this happens in Datadog.
-    // The following line is commented out and replaced with `next()`
-    // response.status(options.statusCode).send(options.message)
-    next()
+    const tags = [`url:${request.url}`, `ip:${request.ip}`]
+    statsd.increment('middleware.rate_limit', 1, tags)
+    response.status(options.statusCode).send(options.message)
   },
 })
